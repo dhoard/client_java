@@ -5,20 +5,29 @@ import com.sun.net.httpserver.BasicAuthenticator;
 import com.sun.net.httpserver.HttpServer;
 import io.prometheus.client.Gauge;
 import io.prometheus.client.CollectorRegistry;
+
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.net.URLConnection;
-import java.util.Scanner;
+import java.security.GeneralSecurityException;
+import java.security.cert.X509Certificate;
+import java.util.Scanner;;
 import java.util.zip.GZIPInputStream;
 
 import io.prometheus.client.SampleNameFilter;
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.Test;
+import org.junit.Test;;
 
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import javax.xml.bind.DatatypeConverter;
 
 import static org.assertj.core.api.Java6Assertions.assertThat;
@@ -26,6 +35,63 @@ import static org.assertj.core.api.Java6Assertions.assertThat;
 public class TestHTTPServer {
 
   CollectorRegistry registry;
+  private final static SSLContext SSL_CONTEXT;
+
+  // Code put in a static block due to possible Exceptions
+  static {
+    try {
+      SSL_CONTEXT = HTTPServer.createSSLContext(
+              "SSL",
+              "PKCS12",
+              "./src/test/resources/keystore.pkcs12",
+              "changeit");
+    } catch (GeneralSecurityException e) {
+      throw new RuntimeException("Exception creating SSL_CONTEXT", e);
+    } catch (IOException e) {
+      throw new RuntimeException("Exception creating SSL_CONTEXT", e);
+    }
+  }
+
+  private final static TrustManager[] TRUST_MANAGERS = new TrustManager[]{
+          new X509TrustManager() {
+            public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+              return new X509Certificate[0];
+            }
+
+            public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {
+            }
+
+            public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {
+            }
+          }
+  };
+
+  private final static HostnameVerifier HOSTNAME_VERIFIER = new HostnameVerifier() {
+    @Override
+    public boolean verify(String hostname, SSLSession session) {
+      return true;
+    }
+  };
+
+  final static Authenticator createAuthenticator(String realm, final String validUsername, final String validPassword) {
+    return new BasicAuthenticator(realm) {
+      @Override
+      public boolean checkCredentials(String username, String password) {
+        return validUsername.equals(username) && validPassword.equals(password);
+      }
+    };
+  }
+
+  class Response {
+
+    public long contentLength;
+    public String body;
+
+    public Response(long contentLength, String body) {
+      this.contentLength = contentLength;
+      this.body = body;
+    }
+  }
 
   @Before
   public void init() throws IOException {
@@ -79,44 +145,54 @@ public class TestHTTPServer {
     return new Response(connection.getContentLength(), scanner.hasNext() ? scanner.next() : "");
   }
 
-  Response requestWithCredentials(HTTPServer httpServer, String context, String suffix, String user, String password) throws IOException {
+  Response requestWithCredentials(HTTPServer httpServer, String context, String suffix, String username, String password) throws IOException {
     String url = "http://localhost:" + httpServer.server.getAddress().getPort() + context + suffix;
     URLConnection connection = new URL(url).openConnection();
     connection.setDoOutput(true);
-    if (user != null && password != null) {
-      connection.setRequestProperty("Authorization", encodeCredentials(user, password));
+    if (username != null && password != null) {
+      connection.setRequestProperty("Authorization", encodeCredentials(username, password));
     }
     connection.connect();
     Scanner s = new Scanner(connection.getInputStream(), "UTF-8").useDelimiter("\\A");
     return new Response(connection.getContentLength(), s.hasNext() ? s.next() : "");
   }
 
-  String encodeCredentials(String user, String password) {
+  Response requestWithSSL(String requestMethod, String username, String password, HTTPServer s, String context, String suffix) throws GeneralSecurityException, IOException {
+    String url = "https://localhost:" + s.server.getAddress().getPort() + context + suffix;
+
+    SSLContext sc = SSLContext.getInstance("SSL");
+    sc.init(null, TRUST_MANAGERS, new java.security.SecureRandom());
+    HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+    HttpsURLConnection.setDefaultHostnameVerifier(HOSTNAME_VERIFIER);
+
+    URLConnection connection = new URL(url).openConnection();
+    ((HttpURLConnection)connection).setRequestMethod(requestMethod);
+
+    if (username != null && password != null) {
+      connection.setRequestProperty("Authorization", encodeCredentials(username, password));
+    }
+
+    connection.setDoOutput(true);
+    connection.connect();
+    Scanner scanner = new Scanner(connection.getInputStream(), "UTF-8").useDelimiter("\\A");
+    return new Response(connection.getContentLength(), scanner.hasNext() ? scanner.next() : "");
+  }
+
+  String encodeCredentials(String username, String password) {
     // Per RFC4648 table 2. We support Java 6, and java.util.Base64 was only added in Java 8,
     try {
-      byte[] credentialsBytes = (user + ":" + password).getBytes("UTF-8");
-      String encoded = DatatypeConverter.printBase64Binary(credentialsBytes);
-      encoded = String.format("Basic %s", encoded);
-      return encoded;
+      byte[] credentialsBytes = (username + ":" + password).getBytes("UTF-8");
+      return "Basic " +  DatatypeConverter.printBase64Binary(credentialsBytes);
     } catch (UnsupportedEncodingException e) {
       throw new IllegalArgumentException(e);
     }
-  }
-
-  Authenticator createAuthenticator(String realm, final String validUsername, final String validPassword) {
-    return new BasicAuthenticator(realm) {
-      @Override
-      public boolean checkCredentials(String username, String password) {
-        return validUsername.equals(username) && validPassword.equals(password);
-      }
-    };
   }
 
   @Test(expected = IllegalArgumentException.class)
   public void testRefuseUsingUnbound() throws IOException {
     CollectorRegistry registry = new CollectorRegistry();
     HTTPServer s = new HTTPServer(HttpServer.create(), registry, true);
-    s.stop();
+    s.close();
   }
 
   @Test
@@ -301,6 +377,8 @@ public class TestHTTPServer {
             .build();
     try {
       Response response = request("HEAD", s, "/metrics", "?name[]=a&name[]=b");
+
+      Assert.assertNotNull(response);
       Assert.assertTrue(response.contentLength == 74);
       Assert.assertTrue("".equals(response.body));
     } finally {
@@ -308,14 +386,78 @@ public class TestHTTPServer {
     }
   }
 
-  class Response {
+  @Test
+  public void testHEADRequestWithSSL() throws GeneralSecurityException, IOException {
+    HTTPServer s = new HTTPServer.Builder()
+            .withRegistry(registry)
+            .withSSLContext(SSL_CONTEXT)
+            .build();
 
-    public long contentLength;
-    public String body;
+    try {
+      Response response = requestWithSSL(
+              "HEAD", null, null, s, "/metrics", "?name[]=a&name[]=b");
 
-    public Response(long contentLength, String body) {
-      this.contentLength = contentLength;
-      this.body = body;
+      Assert.assertNotNull(response);
+      Assert.assertTrue(response.contentLength == 74);
+      Assert.assertTrue("".equals(response.body));
+    } finally {
+      s.close();
+    }
+  }
+
+  @Test
+  public void testHEADRequestWithSSLAndBasicAuthSuccess() throws GeneralSecurityException, IOException {
+    HTTPServer s = new HTTPServer.Builder()
+            .withRegistry(registry)
+            .withSSLContext(SSL_CONTEXT)
+            .withAuthenticator(createAuthenticator("/", "user", "secret"))
+            .build();
+
+    try {
+      Response response = requestWithSSL(
+              "HEAD", "user", "secret", s, "/metrics", "?name[]=a&name[]=b");
+
+      Assert.assertNotNull(response);
+      Assert.assertTrue(response.contentLength == 74);
+      Assert.assertTrue("".equals(response.body));
+    } finally {
+      s.close();
+    }
+  }
+
+  @Test
+  public void testHEADRequestWithSSLAndBasicAuthCredentialsMissing() throws GeneralSecurityException, IOException {
+    HTTPServer s = new HTTPServer.Builder()
+            .withRegistry(registry)
+            .withSSLContext(SSL_CONTEXT)
+            .withAuthenticator(createAuthenticator("/", "user", "secret"))
+            .build();
+
+    try {
+      Response response = requestWithSSL("HEAD", null, null, s, "/metrics", "?name[]=a&name[]=b");
+      Assert.fail("expected IOException with HTTP 401");
+    } catch (IOException e) {
+      Assert.assertTrue(e.getMessage().contains("401"));
+    } finally {
+      s.close();
+    }
+  }
+
+  @Test
+  public void testHEADRequestWithSSLAndBasicAuthWrongCredentials() throws GeneralSecurityException, IOException {
+    HTTPServer s = new HTTPServer.Builder()
+            .withRegistry(registry)
+            .withSSLContext(SSL_CONTEXT)
+            .withAuthenticator(createAuthenticator("/", "user", "secret"))
+            .build();
+
+    try {
+      Response response = requestWithSSL("HEAD", "user", "wrong", s, "/metrics", "?name[]=a&name[]=b");
+      Assert.fail("expected IOException with HTTP 401");
+    } catch (IOException e) {
+      Assert.assertTrue(e.getMessage().contains("401"));
+    } finally {
+      s.close();
     }
   }
 }

@@ -1,5 +1,8 @@
 package io.prometheus.client.exporter;
 
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsParameters;
+import com.sun.net.httpserver.HttpsServer;
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.SampleNameFilter;
 import io.prometheus.client.Predicate;
@@ -8,6 +11,8 @@ import io.prometheus.client.exporter.common.TextFormat;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
@@ -15,6 +20,8 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.Charset;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -31,6 +38,14 @@ import com.sun.net.httpserver.HttpContext;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLServerSocket;
+import javax.net.ssl.SSLServerSocketFactory;
+import javax.net.ssl.TrustManagerFactory;
 
 /**
  * Expose Prometheus metrics using a plain Java HttpServer.
@@ -200,6 +215,7 @@ public class HTTPServer implements Closeable {
         private Predicate<String> sampleNameFilter;
         private Supplier<Predicate<String>> sampleNameFilterSupplier;
         private Authenticator authenticator;
+        private SSLContext sslContext;
 
         /**
          * Port to bind to. Must not be called together with {@link #withInetSocketAddress(InetSocketAddress)}
@@ -300,6 +316,14 @@ public class HTTPServer implements Closeable {
         }
 
         /**
+         * Optional: Configure server to support TLS/SSL
+         */
+        public Builder withSSLContext(SSLContext sslContext) {
+            this.sslContext = sslContext;
+            return this;
+        }
+
+        /**
          * Build the HTTPServer
          * @throws IOException
          */
@@ -308,11 +332,13 @@ public class HTTPServer implements Closeable {
                 assertNull(sampleNameFilterSupplier, "cannot configure 'sampleNameFilter' and 'sampleNameFilterSupplier' at the same time");
                 sampleNameFilterSupplier = SampleNameFilterSupplier.of(sampleNameFilter);
             }
+
             if (httpServer != null) {
                 assertZero(port, "cannot configure 'httpServer' and 'port' at the same time");
                 assertNull(hostname, "cannot configure 'httpServer' and 'hostname' at the same time");
                 assertNull(inetAddress, "cannot configure 'httpServer' and 'inetAddress' at the same time");
                 assertNull(inetSocketAddress, "cannot configure 'httpServer' and 'inetSocketAddress' at the same time");
+                assertNull(sslContext, "cannot configure 'httpServer' and 'sslContext' at the same time");
                 return new HTTPServer(httpServer, registry, daemon, sampleNameFilterSupplier, authenticator);
             } else if (inetSocketAddress != null) {
                 assertZero(port, "cannot configure 'inetSocketAddress' and 'port' at the same time");
@@ -326,7 +352,16 @@ public class HTTPServer implements Closeable {
             } else {
                 inetSocketAddress = new InetSocketAddress(port);
             }
-            return new HTTPServer(HttpServer.create(inetSocketAddress, 3), registry, daemon, sampleNameFilterSupplier, authenticator);
+
+            HttpServer httpServer = null;
+            if (sslContext != null) {
+                httpServer = HttpsServer.create(inetSocketAddress, 3);
+                ((HttpsServer)httpServer).setHttpsConfigurator(createHttpsConfigurator(sslContext));
+            } else {
+                httpServer = HttpServer.create(inetSocketAddress, 3);
+            }
+
+            return new HTTPServer(httpServer, registry, daemon, sampleNameFilterSupplier, authenticator);
         }
 
         private void assertNull(Object o, String msg) {
@@ -464,5 +499,72 @@ public class HTTPServer implements Closeable {
      */
     public int getPort() {
         return server.getAddress().getPort();
+    }
+
+    /**
+     * Create an SSLContext
+     * @param sslContextType
+     * @param keyStoreType
+     * @param keyStorePath
+     * @param keyStorePassword
+     * @return SSLContext
+     * @throws GeneralSecurityException
+     * @throws IOException
+     */
+    public static SSLContext createSSLContext(String sslContextType, String keyStoreType, String keyStorePath, String keyStorePassword)
+            throws GeneralSecurityException, IOException {
+        SSLContext sslContext = null;
+        FileInputStream fileInputStream = null;
+
+        try {
+            File file = new File(keyStorePath);
+
+            if ((file.exists() == false) || (file.isFile() == false) || (file.canRead() == false)) {
+                throw new IllegalArgumentException("cannot read 'keyStorePath', path = [" + file.getAbsolutePath() + "]");
+            }
+
+            fileInputStream = new FileInputStream(keyStorePath);
+
+            KeyStore keyStore = KeyStore.getInstance(keyStoreType);
+            keyStore.load(fileInputStream, keyStorePassword.toCharArray());
+
+            KeyManagerFactory keyManagerFactor = KeyManagerFactory.getInstance("SunX509");
+            keyManagerFactor.init(keyStore, keyStorePassword.toCharArray());
+
+            TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance("SunX509");
+            trustManagerFactory.init(keyStore);
+
+            sslContext = SSLContext.getInstance(sslContextType);
+            sslContext.init(keyManagerFactor.getKeyManagers(), trustManagerFactory.getTrustManagers(), null);
+        } finally {
+            if (fileInputStream != null) {
+                try {
+                    fileInputStream.close();
+                } catch (IOException e) {
+                    // IGNORE
+                }
+            }
+        }
+
+        return sslContext;
+    }
+
+    private static HttpsConfigurator createHttpsConfigurator(SSLContext sslContext) {
+        return new HttpsConfigurator(sslContext) {
+            @Override
+            public void configure(HttpsParameters params) {
+                try {
+                    SSLContext c = getSSLContext();
+                    SSLEngine engine = c.createSSLEngine();
+                    params.setNeedClientAuth(false);
+                    params.setCipherSuites(engine.getEnabledCipherSuites());
+                    params.setProtocols(engine.getEnabledProtocols());
+                    SSLParameters sslParameters = c.getSupportedSSLParameters();
+                    params.setSSLParameters(sslParameters);
+                } catch (Exception e) {
+                    throw new RuntimeException("Exception creating HttpsConfigurator", e);
+                }
+            }
+        };
     }
 }
