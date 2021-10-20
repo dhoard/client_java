@@ -3,9 +3,13 @@ package io.prometheus.client.exporter;
 import com.sun.net.httpserver.Authenticator;
 import com.sun.net.httpserver.BasicAuthenticator;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsParameters;
 import io.prometheus.client.Gauge;
 import io.prometheus.client.CollectorRegistry;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
@@ -13,6 +17,7 @@ import java.net.InetSocketAddress;
 import java.net.URL;
 import java.net.URLConnection;
 import java.security.GeneralSecurityException;
+import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 import java.util.Scanner;;
 import java.util.zip.GZIPInputStream;
@@ -24,9 +29,13 @@ import org.junit.Test;;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 import javax.xml.bind.DatatypeConverter;
 
@@ -35,12 +44,15 @@ import static org.assertj.core.api.Java6Assertions.assertThat;
 public class TestHTTPServer {
 
   CollectorRegistry registry;
+
   private final static SSLContext SSL_CONTEXT;
+
+  private final static HttpsConfigurator HTTPS_CONFIGURATOR;
 
   // Code put in a static block due to possible Exceptions
   static {
     try {
-      SSL_CONTEXT = HTTPServer.createSSLContext(
+      SSL_CONTEXT = createSSLContext(
               "SSL",
               "PKCS12",
               "./src/test/resources/keystore.pkcs12",
@@ -50,6 +62,8 @@ public class TestHTTPServer {
     } catch (IOException e) {
       throw new RuntimeException("Exception creating SSL_CONTEXT", e);
     }
+
+    HTTPS_CONFIGURATOR = createHttpsConfigurator(SSL_CONTEXT);
   }
 
   private final static TrustManager[] TRUST_MANAGERS = new TrustManager[]{
@@ -390,7 +404,7 @@ public class TestHTTPServer {
   public void testHEADRequestWithSSL() throws GeneralSecurityException, IOException {
     HTTPServer s = new HTTPServer.Builder()
             .withRegistry(registry)
-            .withSSLContext(SSL_CONTEXT)
+            .withHttpsConfigurator(HTTPS_CONFIGURATOR)
             .build();
 
     try {
@@ -409,7 +423,7 @@ public class TestHTTPServer {
   public void testHEADRequestWithSSLAndBasicAuthSuccess() throws GeneralSecurityException, IOException {
     HTTPServer s = new HTTPServer.Builder()
             .withRegistry(registry)
-            .withSSLContext(SSL_CONTEXT)
+            .withHttpsConfigurator(HTTPS_CONFIGURATOR)
             .withAuthenticator(createAuthenticator("/", "user", "secret"))
             .build();
 
@@ -429,7 +443,7 @@ public class TestHTTPServer {
   public void testHEADRequestWithSSLAndBasicAuthCredentialsMissing() throws GeneralSecurityException, IOException {
     HTTPServer s = new HTTPServer.Builder()
             .withRegistry(registry)
-            .withSSLContext(SSL_CONTEXT)
+            .withHttpsConfigurator(HTTPS_CONFIGURATOR)
             .withAuthenticator(createAuthenticator("/", "user", "secret"))
             .build();
 
@@ -447,7 +461,7 @@ public class TestHTTPServer {
   public void testHEADRequestWithSSLAndBasicAuthWrongCredentials() throws GeneralSecurityException, IOException {
     HTTPServer s = new HTTPServer.Builder()
             .withRegistry(registry)
-            .withSSLContext(SSL_CONTEXT)
+            .withHttpsConfigurator(HTTPS_CONFIGURATOR)
             .withAuthenticator(createAuthenticator("/", "user", "secret"))
             .build();
 
@@ -459,5 +473,77 @@ public class TestHTTPServer {
     } finally {
       s.close();
     }
+  }
+  /**
+   * Create an SSLContext
+   *
+   * @param sslContextType
+   * @param keyStoreType
+   * @param keyStorePath
+   * @param keyStorePassword
+   * @return SSLContext
+   * @throws GeneralSecurityException
+   * @throws IOException
+   */
+  public static SSLContext createSSLContext(String sslContextType, String keyStoreType, String keyStorePath, String keyStorePassword)
+          throws GeneralSecurityException, IOException {
+    SSLContext sslContext = null;
+    FileInputStream fileInputStream = null;
+
+    try {
+      File file = new File(keyStorePath);
+
+      if ((file.exists() == false) || (file.isFile() == false) || (file.canRead() == false)) {
+        throw new IllegalArgumentException("cannot read 'keyStorePath', path = [" + file.getAbsolutePath() + "]");
+      }
+
+      fileInputStream = new FileInputStream(keyStorePath);
+
+      KeyStore keyStore = KeyStore.getInstance(keyStoreType);
+      keyStore.load(fileInputStream, keyStorePassword.toCharArray());
+
+      KeyManagerFactory keyManagerFactor = KeyManagerFactory.getInstance("SunX509");
+      keyManagerFactor.init(keyStore, keyStorePassword.toCharArray());
+
+      TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance("SunX509");
+      trustManagerFactory.init(keyStore);
+
+      sslContext = SSLContext.getInstance(sslContextType);
+      sslContext.init(keyManagerFactor.getKeyManagers(), trustManagerFactory.getTrustManagers(), null);
+    } finally {
+      if (fileInputStream != null) {
+        try {
+          fileInputStream.close();
+        } catch (IOException e) {
+          // IGNORE
+        }
+      }
+    }
+
+    return sslContext;
+  }
+
+  /**
+   *
+   * @param sslContext
+   * @return HttpsConfigurator
+   */
+  private static HttpsConfigurator createHttpsConfigurator(SSLContext sslContext) {
+    return new HttpsConfigurator(sslContext) {
+      @Override
+      public void configure(HttpsParameters params) {
+        try {
+          SSLContext c = getSSLContext();
+          SSLEngine engine = c.createSSLEngine();
+          params.setNeedClientAuth(false);
+          params.setCipherSuites(engine.getEnabledCipherSuites());
+          params.setProtocols(engine.getEnabledProtocols());
+          SSLParameters sslParameters = c.getSupportedSSLParameters();
+          params.setSSLParameters(sslParameters);
+        } catch (Exception e) {
+          throw new RuntimeException("Exception creating HttpsConfigurator", e);
+        }
+      }
+    };
   }
 }

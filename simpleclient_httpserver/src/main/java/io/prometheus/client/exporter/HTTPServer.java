@@ -215,7 +215,7 @@ public class HTTPServer implements Closeable {
         private Predicate<String> sampleNameFilter;
         private Supplier<Predicate<String>> sampleNameFilterSupplier;
         private Authenticator authenticator;
-        private SSLContext sslContext;
+        private HttpsConfigurator configurator;
 
         /**
          * Port to bind to. Must not be called together with {@link #withInetSocketAddress(InetSocketAddress)}
@@ -316,10 +316,10 @@ public class HTTPServer implements Closeable {
         }
 
         /**
-         * Optional: Configure server to support TLS/SSL
+         * Optional: {@link HttpsConfigurator} to use to support TLS/SSL
          */
-        public Builder withSSLContext(SSLContext sslContext) {
-            this.sslContext = sslContext;
+        public Builder withHttpsConfigurator(HttpsConfigurator configurator) {
+            this.configurator = configurator;
             return this;
         }
 
@@ -338,7 +338,7 @@ public class HTTPServer implements Closeable {
                 assertNull(hostname, "cannot configure 'httpServer' and 'hostname' at the same time");
                 assertNull(inetAddress, "cannot configure 'httpServer' and 'inetAddress' at the same time");
                 assertNull(inetSocketAddress, "cannot configure 'httpServer' and 'inetSocketAddress' at the same time");
-                assertNull(sslContext, "cannot configure 'httpServer' and 'sslContext' at the same time");
+                assertNull(configurator, "cannot configure 'httpServer' and 'configurator' at the same time");
                 return new HTTPServer(httpServer, registry, daemon, sampleNameFilterSupplier, authenticator);
             } else if (inetSocketAddress != null) {
                 assertZero(port, "cannot configure 'inetSocketAddress' and 'port' at the same time");
@@ -354,9 +354,9 @@ public class HTTPServer implements Closeable {
             }
 
             HttpServer httpServer = null;
-            if (sslContext != null) {
+            if (configurator != null) {
                 httpServer = HttpsServer.create(inetSocketAddress, 3);
-                ((HttpsServer)httpServer).setHttpsConfigurator(createHttpsConfigurator(sslContext));
+                ((HttpsServer)httpServer).setHttpsConfigurator(configurator);
             } else {
                 httpServer = HttpServer.create(inetSocketAddress, 3);
             }
@@ -499,72 +499,5 @@ public class HTTPServer implements Closeable {
      */
     public int getPort() {
         return server.getAddress().getPort();
-    }
-
-    /**
-     * Create an SSLContext
-     * @param sslContextType
-     * @param keyStoreType
-     * @param keyStorePath
-     * @param keyStorePassword
-     * @return SSLContext
-     * @throws GeneralSecurityException
-     * @throws IOException
-     */
-    public static SSLContext createSSLContext(String sslContextType, String keyStoreType, String keyStorePath, String keyStorePassword)
-            throws GeneralSecurityException, IOException {
-        SSLContext sslContext = null;
-        FileInputStream fileInputStream = null;
-
-        try {
-            File file = new File(keyStorePath);
-
-            if ((file.exists() == false) || (file.isFile() == false) || (file.canRead() == false)) {
-                throw new IllegalArgumentException("cannot read 'keyStorePath', path = [" + file.getAbsolutePath() + "]");
-            }
-
-            fileInputStream = new FileInputStream(keyStorePath);
-
-            KeyStore keyStore = KeyStore.getInstance(keyStoreType);
-            keyStore.load(fileInputStream, keyStorePassword.toCharArray());
-
-            KeyManagerFactory keyManagerFactor = KeyManagerFactory.getInstance("SunX509");
-            keyManagerFactor.init(keyStore, keyStorePassword.toCharArray());
-
-            TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance("SunX509");
-            trustManagerFactory.init(keyStore);
-
-            sslContext = SSLContext.getInstance(sslContextType);
-            sslContext.init(keyManagerFactor.getKeyManagers(), trustManagerFactory.getTrustManagers(), null);
-        } finally {
-            if (fileInputStream != null) {
-                try {
-                    fileInputStream.close();
-                } catch (IOException e) {
-                    // IGNORE
-                }
-            }
-        }
-
-        return sslContext;
-    }
-
-    private static HttpsConfigurator createHttpsConfigurator(SSLContext sslContext) {
-        return new HttpsConfigurator(sslContext) {
-            @Override
-            public void configure(HttpsParameters params) {
-                try {
-                    SSLContext c = getSSLContext();
-                    SSLEngine engine = c.createSSLEngine();
-                    params.setNeedClientAuth(false);
-                    params.setCipherSuites(engine.getEnabledCipherSuites());
-                    params.setProtocols(engine.getEnabledProtocols());
-                    SSLParameters sslParameters = c.getSupportedSSLParameters();
-                    params.setSSLParameters(sslParameters);
-                } catch (Exception e) {
-                    throw new RuntimeException("Exception creating HttpsConfigurator", e);
-                }
-            }
-        };
     }
 }
