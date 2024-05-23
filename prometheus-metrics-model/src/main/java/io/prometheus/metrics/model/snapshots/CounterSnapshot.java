@@ -143,20 +143,8 @@ public class CounterSnapshot extends MetricSnapshot {
             return this;
         }
 
-        public Builder uniqueDataPoint(CounterDataPointSnapshot data) throws DuplicateLabelsException {
-            if (labels.contains(data.getLabels())) {
-                throw new DuplicateLabelsException(buildMetadata(), data.getLabels());
-            }
-            return dataPoint(data);
-        }
-
-        public boolean containsLabels(Labels labels) {
-            for (CounterDataPointSnapshot snapshot : dataPoints) {
-                if (snapshot.getLabels().equals(labels)) {
-                    return true;
-                }
-            }
-            return false;
+        public boolean containsSnapshotWithLabels(Labels labels) {
+            return this.labels.contains(labels);
         }
 
         public CounterSnapshot build() {

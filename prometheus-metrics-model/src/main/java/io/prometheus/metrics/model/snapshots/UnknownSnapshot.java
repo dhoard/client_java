@@ -132,14 +132,7 @@ public final class UnknownSnapshot extends MetricSnapshot {
             return this;
         }
 
-        public Builder uniqueDataPoint(UnknownDataPointSnapshot data) throws DuplicateLabelsException {
-            if (labels.contains(data.getLabels())) {
-                throw new DuplicateLabelsException(buildMetadata(), data.getLabels());
-            }
-            return dataPoint(data);
-        }
-
-        public boolean containsLabels(Labels labels) {
+        public boolean containsSnapshotWithLabels(Labels labels) {
             return this.labels.contains(labels);
         }
 

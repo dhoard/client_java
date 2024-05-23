@@ -68,4 +68,19 @@ public class UnknownSnapshotTest {
     public void testValueMissing() {
         UnknownSnapshot.UnknownDataPointSnapshot.builder().build();
     }
+
+    @Test
+    public void testContainersSnapshotWithLabels() {
+        UnknownSnapshot.Builder builder =
+                UnknownSnapshot.builder()
+                .name("test")
+                .dataPoint(
+                    UnknownSnapshot.UnknownDataPointSnapshot.builder()
+                        .value(1.2345)
+                        .labels(Labels.of("env", "dev"))
+                        .build());
+
+        Assert.assertTrue(builder.containsSnapshotWithLabels(Labels.of("env", "dev")));
+        Assert.assertFalse(builder.containsSnapshotWithLabels(Labels.of("bad", "missing")));
+    }
 }

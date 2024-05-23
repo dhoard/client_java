@@ -105,4 +105,19 @@ public class CounterSnapshotTest {
         iterator.next();
         iterator.remove();
     }
+
+    @Test
+    public void testContainersSnapshotWithLabels() {
+        CounterSnapshot.Builder builder =
+                CounterSnapshot.builder()
+                        .name("test")
+                        .dataPoint(
+                                CounterSnapshot.CounterDataPointSnapshot.builder()
+                                        .value(1.2345)
+                                        .labels(Labels.of("env", "dev"))
+                                        .build());
+
+        Assert.assertTrue(builder.containsSnapshotWithLabels(Labels.of("env", "dev")));
+        Assert.assertFalse(builder.containsSnapshotWithLabels(Labels.of("bad", "missing")));
+    }
 }

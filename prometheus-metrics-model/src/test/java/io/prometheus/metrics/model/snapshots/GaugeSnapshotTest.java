@@ -108,4 +108,19 @@ public class GaugeSnapshotTest {
         iterator.next();
         iterator.remove();
     }
+
+    @Test
+    public void testContainersSnapshotWithLabels() {
+        GaugeSnapshot.Builder builder =
+                GaugeSnapshot.builder()
+                        .name("test")
+                        .dataPoint(
+                                GaugeSnapshot.GaugeDataPointSnapshot.builder()
+                                        .value(1.2345)
+                                        .labels(Labels.of("env", "dev"))
+                                        .build());
+
+        Assert.assertTrue(builder.containsSnapshotWithLabels(Labels.of("env", "dev")));
+        Assert.assertFalse(builder.containsSnapshotWithLabels(Labels.of("bad", "missing")));
+    }
 }
