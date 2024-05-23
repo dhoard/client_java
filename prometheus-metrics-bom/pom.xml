@@ -17,7 +17,7 @@
     </description>
 
     <properties>
-        <prometheus.metrics.shaded.dependencies.version>1.3.0</prometheus.metrics.shaded.dependencies.version>
+        <prometheus.metrics.shaded.dependencies.version>1.3.1</prometheus.metrics.shaded.dependencies.version>
     </properties>
 
     <licenses>
