@@ -2,7 +2,11 @@ package io.prometheus.metrics.model.snapshots;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+
+import static io.prometheus.metrics.model.snapshots.PrometheusNaming.prometheusName;
 
 /**
  * Immutable snapshot of an Unknown (Untyped) metric.
@@ -114,6 +118,7 @@ public final class UnknownSnapshot extends MetricSnapshot {
     public static class Builder extends MetricSnapshot.Builder<Builder> {
 
         private final List<UnknownDataPointSnapshot> dataPoints = new ArrayList<>();
+        private final Set<Labels> labels = new HashSet<>();
 
         private Builder() {
         }
@@ -122,8 +127,20 @@ public final class UnknownSnapshot extends MetricSnapshot {
          * Add a data point. Call multiple times to add multiple data points.
          */
         public Builder dataPoint(UnknownDataPointSnapshot data) {
+            labels.add(data.getLabels());
             dataPoints.add(data);
             return this;
+        }
+
+        public Builder uniqueDataPoint(UnknownDataPointSnapshot data) throws DuplicateLabelsException {
+            if (labels.contains(data.getLabels())) {
+                throw new DuplicateLabelsException(buildMetadata(), data.getLabels());
+            }
+            return dataPoint(data);
+        }
+
+        public boolean containsLabels(Labels labels) {
+            return this.labels.contains(labels);
         }
 
         public UnknownSnapshot build() {

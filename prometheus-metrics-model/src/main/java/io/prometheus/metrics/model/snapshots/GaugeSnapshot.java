@@ -2,7 +2,9 @@ package io.prometheus.metrics.model.snapshots;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Immutable snapshot of a Gauge.
@@ -113,6 +115,7 @@ public final class GaugeSnapshot extends MetricSnapshot {
     public static class Builder extends MetricSnapshot.Builder<Builder> {
 
         private final List<GaugeDataPointSnapshot> dataPoints = new ArrayList<>();
+        private final Set<Labels> labels = new HashSet<>();
 
         private Builder() {
         }
@@ -121,8 +124,25 @@ public final class GaugeSnapshot extends MetricSnapshot {
          * Add a data point. This can be alled multiple times to add multiple data points.
          */
         public Builder dataPoint(GaugeDataPointSnapshot dataPoint) {
+            labels.add(dataPoint.getLabels());
             dataPoints.add(dataPoint);
             return this;
+        }
+
+        public Builder uniqueDataPoint(GaugeSnapshot.GaugeDataPointSnapshot data) throws DuplicateLabelsException {
+            if (labels.contains(data.getLabels())) {
+                throw new DuplicateLabelsException(buildMetadata(), data.getLabels());
+            }
+            return dataPoint(data);
+        }
+
+        public boolean containsLabels(Labels labels) {
+            for (GaugeDataPointSnapshot snapshot : dataPoints) {
+                if (snapshot.getLabels().equals(labels)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         public GaugeSnapshot build() {
