@@ -56,6 +56,15 @@ or simply
 mise run compile
 ```
 
+## Version Numbers in Examples
+
+Example `pom.xml` files (under `examples/`) should reference the latest
+**released** version, not a SNAPSHOT. After each release, Renovate
+updates these versions automatically.
+
+Only use a SNAPSHOT version in an example when it demonstrates a new
+feature that has not been released yet.
+
 ## Updating the Protobuf Java Classes
 
 The generated protobuf `Metrics.java` lives in a versioned package

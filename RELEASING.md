@@ -1,39 +1,58 @@
 # Releasing Instructions for Prometheus Java Client
 
+Releases are automated via
+[release-please](https://github.com/googleapis/release-please).
+
+## How It Works
+
+1. Commits to `main` using
+   [Conventional Commits](https://www.conventionalcommits.org/) are
+   tracked by release-please.
+2. Release-please maintains a release PR that accumulates changes and
+   updates the changelog.
+3. When the release PR is merged, release-please creates a GitHub
+   release and a `vX.Y.Z` tag.
+4. The tag triggers the existing `release.yml` workflow, which deploys
+   to Maven Central.
+5. After tagging, release-please opens a follow-up PR to bump the
+   SNAPSHOT version in all `pom.xml` files.
+
+## Patch Release (default)
+
+Simply merge the release PR — release-please bumps the patch version
+by default (e.g. `1.5.0` -> `1.5.1`).
+
+## Minor or Major Release
+
+Add a `release-as: X.Y.0` footer to any commit on `main`:
+
+```text
+feat: add new feature
+
+release-as: 1.6.0
+```
+
+Alternatively, edit the release PR title to
+`chore(main): release 1.6.0`.
+
 ## Before the Release
 
-If there have been significant changes since the last release, update the
-benchmarks before creating a new release:
+If there have been significant changes since the last release, update
+the benchmarks before merging the release PR:
 
 ```shell
 mise run update-benchmarks
 ```
 
-## Create a Release
-
-1. Go to <https://github.com/prometheus/client_java/releases/new>
-2. Click on "Choose a tag", enter the tag name (e.g. `v0.1.0`), and click "Create a new tag".
-3. Click on "Generate release notes" to auto-generate the release notes based on the commits since
-   the last release.
-4. Click on "Publish release".
-
-## Major or minor release
-
-After the release is created, do a text replace everywhere in the repository to update the
-snapshot version in the `pom.xml` files (and some other files) to the next version.
-For example, if the last release was `1.4.0`, the next snapshot version should be `1.5.0-SNAPSHOT`.
-
-Replace `1.4.0-SNAPSHOT` with `1.5.0-SNAPSHOT` in all following files.
-
-## If the GPG key expired
+## If the GPG Key Expired
 
 1. Generate a new key:
    <https://central.sonatype.org/publish/requirements/gpg/#generating-a-key-pair>
-2. Distribute the
-   key: <https://central.sonatype.org/publish/requirements/gpg/#distributing-your-public-key>
-3. use `gpg --armor --export-secret-keys YOUR_ID` to
-   export ([docs](https://github.com/actions/setup-java/blob/main/docs/advanced-usage.md#gpg))
-4. Update the
-   passphrase: <https://github.com/prometheus/client_java/settings/secrets/actions/GPG_SIGNING_PASSPHRASE> <!-- editorconfig-checker-disable-line -->
-5. Update the GPG
-   key: <https://github.com/prometheus/client_java/settings/secrets/actions/GPG_SIGNING_KEY>
+2. Distribute the key:
+   <https://central.sonatype.org/publish/requirements/gpg/#distributing-your-public-key>
+3. Use `gpg --armor --export-secret-keys YOUR_ID` to export
+   ([docs](https://github.com/actions/setup-java/blob/main/docs/advanced-usage.md#gpg))
+4. Update the passphrase:
+   <https://github.com/prometheus/client_java/settings/secrets/actions/GPG_SIGNING_PASSPHRASE>
+5. Update the GPG key:
+   <https://github.com/prometheus/client_java/settings/secrets/actions/GPG_SIGNING_KEY>
