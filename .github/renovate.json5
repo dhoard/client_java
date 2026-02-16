@@ -1,6 +1,6 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  extends: ["config:best-practices", "config:recommended"],
+  extends: ["config:best-practices", "config:recommended", "github>grafana/flint"],
   platformCommit: "enabled",
   automerge: true,
   ignorePaths: [
@@ -33,12 +33,5 @@
       matchPackageNames: ["/^io\\.prometheus:(examples|example-.+|integration-tests|it-.+)$/"],
     },
   ],
-  customManagers: [
-    {
-      customType: "regex",
-      description: "Update _VERSION variables in mise.toml",
-      managerFilePatterns: ["/^mise\\.toml$/"],
-      matchStrings: ['# renovate: datasource=(?<datasource>[a-z-]+?)(?: depName=(?<depName>.+?))?(?: packageName=(?<packageName>.+?))?(?: versioning=(?<versioning>[a-z-]+?))?\\s.+?_VERSION="?(?<currentValue>[^@"]+?)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"?\\s'],
-    },
-  ],
+  customManagers: [],
 }
