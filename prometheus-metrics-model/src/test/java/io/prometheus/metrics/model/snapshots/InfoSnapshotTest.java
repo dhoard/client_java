@@ -60,14 +60,14 @@ class InfoSnapshotTest {
   }
 
   @Test
-  void testNameMustNotIncludeSuffix() {
-    assertThatExceptionOfType(IllegalArgumentException.class)
-        .isThrownBy(() -> InfoSnapshot.builder().name("jvm_info").build());
+  void testNameMayIncludeSuffix() {
+    InfoSnapshot snapshot = InfoSnapshot.builder().name("jvm_info").build();
+    assertThat(snapshot.getMetadata().getPrometheusName()).isEqualTo("jvm_info");
   }
 
   @Test
-  void testNameMustNotIncludeSuffixDot() {
-    assertThatExceptionOfType(IllegalArgumentException.class)
-        .isThrownBy(() -> InfoSnapshot.builder().name("jvm.info").build());
+  void testNameMayIncludeSuffixDot() {
+    InfoSnapshot snapshot = InfoSnapshot.builder().name("jvm.info").build();
+    assertThat(snapshot.getMetadata().getPrometheusName()).isEqualTo("jvm_info");
   }
 }
