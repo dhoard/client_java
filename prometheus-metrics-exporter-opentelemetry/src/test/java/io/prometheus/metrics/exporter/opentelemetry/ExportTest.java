@@ -10,6 +10,7 @@ import io.opentelemetry.sdk.metrics.export.MetricReader;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.testing.assertj.MetricAssert;
 import io.opentelemetry.sdk.testing.assertj.OpenTelemetryAssertions;
+import io.opentelemetry.sdk.testing.exporter.InMemoryMetricReader;
 import io.opentelemetry.sdk.testing.junit5.OpenTelemetryExtension;
 import io.prometheus.metrics.core.metrics.Counter;
 import io.prometheus.metrics.core.metrics.Gauge;
@@ -23,6 +24,7 @@ import io.prometheus.metrics.model.snapshots.Labels;
 import io.prometheus.metrics.model.snapshots.Unit;
 import io.prometheus.metrics.model.snapshots.UnknownSnapshot;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +49,8 @@ class ExportTest {
         new PrometheusMetricProducer(
             registry,
             InstrumentationScopeInfo.create("test"),
-            Resource.create(Attributes.builder().put("staticRes", "value").build()));
+            Resource.create(Attributes.builder().put("staticRes", "value").build()),
+            false);
 
     reader.register(prometheusMetricProducer);
   }
@@ -322,6 +325,60 @@ class ExportTest {
 
     List<MetricData> metrics = testing.getMetrics();
     assertThat(metrics).isEmpty();
+  }
+
+  @Test
+  void preserveNamesWithUnit() {
+    InMemoryMetricReader reader = InMemoryMetricReader.create();
+    PrometheusRegistry preserveRegistry = new PrometheusRegistry();
+    reader.register(
+        new PrometheusMetricProducer(
+            preserveRegistry,
+            InstrumentationScopeInfo.create("test"),
+            Resource.create(Attributes.builder().put("staticRes", "value").build()),
+            true));
+
+    Counter.builder().name("req").unit(Unit.BYTES).register(preserveRegistry).inc();
+
+    List<MetricData> metrics = new ArrayList<>(reader.collectAllMetrics());
+    assertThat(metrics).hasSize(1);
+    OpenTelemetryAssertions.assertThat(metrics.get(0)).hasName("req").hasUnit("By");
+  }
+
+  @Test
+  void preserveNamesWithUnitAlreadyInName() {
+    InMemoryMetricReader reader = InMemoryMetricReader.create();
+    PrometheusRegistry preserveRegistry = new PrometheusRegistry();
+    reader.register(
+        new PrometheusMetricProducer(
+            preserveRegistry,
+            InstrumentationScopeInfo.create("test"),
+            Resource.create(Attributes.builder().put("staticRes", "value").build()),
+            true));
+
+    Counter.builder().name("req_bytes").unit(Unit.BYTES).register(preserveRegistry).inc();
+
+    List<MetricData> metrics = new ArrayList<>(reader.collectAllMetrics());
+    assertThat(metrics).hasSize(1);
+    OpenTelemetryAssertions.assertThat(metrics.get(0)).hasName("req_bytes").hasUnit("By");
+  }
+
+  @Test
+  void preserveNamesWithoutUnit() {
+    InMemoryMetricReader reader = InMemoryMetricReader.create();
+    PrometheusRegistry preserveRegistry = new PrometheusRegistry();
+    reader.register(
+        new PrometheusMetricProducer(
+            preserveRegistry,
+            InstrumentationScopeInfo.create("test"),
+            Resource.create(Attributes.builder().put("staticRes", "value").build()),
+            true));
+
+    Counter.builder().name("events_total").register(preserveRegistry).inc();
+
+    List<MetricData> metrics = new ArrayList<>(reader.collectAllMetrics());
+    assertThat(metrics).hasSize(1);
+    OpenTelemetryAssertions.assertThat(metrics.get(0)).hasName("events_total");
   }
 
   private MetricAssert metricAssert() {
