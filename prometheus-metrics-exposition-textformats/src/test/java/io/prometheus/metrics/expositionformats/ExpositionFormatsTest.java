@@ -155,7 +155,8 @@ class ExpositionFormatsTest {
                     .build())
             .build();
     ExpositionFormats formats = ExpositionFormats.init(props);
-    ExpositionFormatWriter writer = formats.findWriter("application/openmetrics-text");
+    ExpositionFormatWriter writer =
+        formats.findWriter("application/openmetrics-text; version=2.0.0");
     assertThat(writer).isInstanceOf(OpenMetrics2TextFormatWriter.class);
   }
 
@@ -171,6 +172,94 @@ class ExpositionFormatsTest {
             "application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily");
     // Protobuf writer should take precedence even when OM2 is enabled
     assertThat(writer).isInstanceOf(PrometheusProtobufWriter.class);
+  }
+
+  @Test
+  void testOM2ContentNegotiationWithVersion2() {
+    PrometheusProperties props =
+        PrometheusProperties.builder()
+            .openMetrics2Properties(
+                OpenMetrics2Properties.builder().enabled(true).contentNegotiation(true).build())
+            .build();
+    ExpositionFormats formats = ExpositionFormats.init(props);
+    ExpositionFormatWriter writer =
+        formats.findWriter("application/openmetrics-text; version=2.0.0");
+    assertThat(writer).isInstanceOf(OpenMetrics2TextFormatWriter.class);
+  }
+
+  @Test
+  void testOM2ContentNegotiationWithVersion1() {
+    PrometheusProperties props =
+        PrometheusProperties.builder()
+            .openMetrics2Properties(
+                OpenMetrics2Properties.builder().enabled(true).contentNegotiation(true).build())
+            .build();
+    ExpositionFormats formats = ExpositionFormats.init(props);
+    ExpositionFormatWriter writer =
+        formats.findWriter("application/openmetrics-text; version=1.0.0");
+    assertThat(writer).isInstanceOf(OpenMetricsTextFormatWriter.class);
+  }
+
+  @Test
+  void testOM2ContentNegotiationWithNoVersion() {
+    // When contentNegotiation=true and Accept header has no version, use OM1 writer
+    PrometheusProperties props =
+        PrometheusProperties.builder()
+            .openMetrics2Properties(
+                OpenMetrics2Properties.builder().enabled(true).contentNegotiation(true).build())
+            .build();
+    ExpositionFormats formats = ExpositionFormats.init(props);
+    ExpositionFormatWriter writer = formats.findWriter("application/openmetrics-text");
+    assertThat(writer).isInstanceOf(OpenMetricsTextFormatWriter.class);
+  }
+
+  @Test
+  void testOM2ContentNegotiationDisabled() {
+    PrometheusProperties props =
+        PrometheusProperties.builder()
+            .openMetrics2Properties(
+                OpenMetrics2Properties.builder().enabled(true).contentNegotiation(false).build())
+            .build();
+    ExpositionFormats formats = ExpositionFormats.init(props);
+    ExpositionFormatWriter writer1 = formats.findWriter("application/openmetrics-text");
+    ExpositionFormatWriter writer2 =
+        formats.findWriter("application/openmetrics-text; version=1.0.0");
+    ExpositionFormatWriter writer3 =
+        formats.findWriter("application/openmetrics-text; version=2.0.0");
+    assertThat(writer1).isInstanceOf(OpenMetrics2TextFormatWriter.class);
+    assertThat(writer2).isInstanceOf(OpenMetrics2TextFormatWriter.class);
+    assertThat(writer3).isInstanceOf(OpenMetrics2TextFormatWriter.class);
+  }
+
+  @Test
+  void testOM2ContentNegotiationMultiTypeAcceptHeaderWithoutOMVersion() {
+    // When the Accept header has multiple media types and only text/plain has a version,
+    // the openmetrics type should be treated as having no version (use OM1).
+    PrometheusProperties props =
+        PrometheusProperties.builder()
+            .openMetrics2Properties(
+                OpenMetrics2Properties.builder().enabled(true).contentNegotiation(true).build())
+            .build();
+    ExpositionFormats formats = ExpositionFormats.init(props);
+    ExpositionFormatWriter writer =
+        formats.findWriter("application/openmetrics-text, text/plain; version=0.0.4");
+    assertThat(writer).isInstanceOf(OpenMetricsTextFormatWriter.class);
+  }
+
+  @Test
+  void testOM2ContentNegotiationMultiTypeAcceptHeaderWithOMVersion() {
+    // When the Accept header has multiple media types and openmetrics has version=2.0.0,
+    // the OM2 writer should be selected.
+    PrometheusProperties props =
+        PrometheusProperties.builder()
+            .openMetrics2Properties(
+                OpenMetrics2Properties.builder().enabled(true).contentNegotiation(true).build())
+            .build();
+    ExpositionFormats formats = ExpositionFormats.init(props);
+    ExpositionFormatWriter writer =
+        formats.findWriter(
+            "application/openmetrics-text; version=2.0.0, text/plain; version=0.0.4");
+    assertThat(writer).isInstanceOf(OpenMetrics2TextFormatWriter.class);
   }
 
   @Test
@@ -1977,14 +2066,14 @@ class ExpositionFormatsTest {
   void testClassicHistogramWithDots() throws IOException {
     String openMetricsText =
         """
-      # TYPE U__my_2e_request_2e_duration_2e_seconds histogram
-      # UNIT U__my_2e_request_2e_duration_2e_seconds seconds
-      # HELP U__my_2e_request_2e_duration_2e_seconds Request duration in seconds
-      U__my_2e_request_2e_duration_2e_seconds_bucket{U__http_2e_path="/hello",le="+Inf"} 130 # {U__some_2e_exemplar_2e_key="some value"} 3.0 1690298864.383
-      U__my_2e_request_2e_duration_2e_seconds_count{U__http_2e_path="/hello"} 130
-      U__my_2e_request_2e_duration_2e_seconds_sum{U__http_2e_path="/hello"} 0.01
-      # EOF
-      """;
+        # TYPE U__my_2e_request_2e_duration_2e_seconds histogram
+        # UNIT U__my_2e_request_2e_duration_2e_seconds seconds
+        # HELP U__my_2e_request_2e_duration_2e_seconds Request duration in seconds
+        U__my_2e_request_2e_duration_2e_seconds_bucket{U__http_2e_path="/hello",le="+Inf"} 130 # {U__some_2e_exemplar_2e_key="some value"} 3.0 1690298864.383
+        U__my_2e_request_2e_duration_2e_seconds_count{U__http_2e_path="/hello"} 130
+        U__my_2e_request_2e_duration_2e_seconds_sum{U__http_2e_path="/hello"} 0.01
+        # EOF
+        """;
     String openMetricsTextWithExemplarsOnAllTimeSeries =
         "# TYPE my_request_duration_seconds histogram\n"
             + "# UNIT my_request_duration_seconds seconds\n"
@@ -2398,14 +2487,14 @@ class ExpositionFormatsTest {
   void testNativeHistogramWithDots() throws IOException {
     String openMetricsText =
         """
-      # TYPE U__my_2e_request_2e_duration_2e_seconds histogram
-      # UNIT U__my_2e_request_2e_duration_2e_seconds seconds
-      # HELP U__my_2e_request_2e_duration_2e_seconds Request duration in seconds
-      U__my_2e_request_2e_duration_2e_seconds_bucket{U__http_2e_path="/hello",le="+Inf"} 4 # {U__some_2e_exemplar_2e_key="some value"} 3.0 1690298864.383
-      U__my_2e_request_2e_duration_2e_seconds_count{U__http_2e_path="/hello"} 4
-      U__my_2e_request_2e_duration_2e_seconds_sum{U__http_2e_path="/hello"} 3.2
-      # EOF
-      """;
+        # TYPE U__my_2e_request_2e_duration_2e_seconds histogram
+        # UNIT U__my_2e_request_2e_duration_2e_seconds seconds
+        # HELP U__my_2e_request_2e_duration_2e_seconds Request duration in seconds
+        U__my_2e_request_2e_duration_2e_seconds_bucket{U__http_2e_path="/hello",le="+Inf"} 4 # {U__some_2e_exemplar_2e_key="some value"} 3.0 1690298864.383
+        U__my_2e_request_2e_duration_2e_seconds_count{U__http_2e_path="/hello"} 4
+        U__my_2e_request_2e_duration_2e_seconds_sum{U__http_2e_path="/hello"} 3.2
+        # EOF
+        """;
     String openMetricsTextWithExemplarsOnAllTimeSeries =
         "# TYPE my_request_duration_seconds histogram\n"
             + "# UNIT my_request_duration_seconds seconds\n"
@@ -2876,12 +2965,19 @@ class ExpositionFormatsTest {
 
   @ParameterizedTest
   @CsvSource({
-    "'application/vnd.google.protobuf;proto=io.prometheus.client.MetricFamily;encoding=delimited', 'application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily; encoding=delimited; escaping=underscores'",
+    "'application/vnd.google.protobuf;proto=io.prometheus.client.MetricFamily;encoding=delimited',"
+        + " 'application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily;"
+        + " encoding=delimited; escaping=underscores'",
     "'text/plain;version=0.0.4', 'text/plain; version=0.0.4; charset=utf-8; escaping=underscores'",
-    "'application/vnd.google.protobuf;proto=io.prometheus.client.MetricFamily;encoding=delimited; escaping=allow-utf-8', 'application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily; encoding=delimited; escaping=allow-utf-8'",
-    "'application/openmetrics-text', 'application/openmetrics-text; version=1.0.0; charset=utf-8; escaping=underscores'",
-    "'application/openmetrics-text;version=0.0.1; escaping=underscores', 'application/openmetrics-text; version=1.0.0; charset=utf-8; escaping=underscores'",
-    "'text/plain;version=0.0.4; escaping=allow-utf-8', 'text/plain; version=0.0.4; charset=utf-8; escaping=allow-utf-8'"
+    "'application/vnd.google.protobuf;proto=io.prometheus.client.MetricFamily;encoding=delimited;"
+        + " escaping=allow-utf-8', 'application/vnd.google.protobuf;"
+        + " proto=io.prometheus.client.MetricFamily; encoding=delimited; escaping=allow-utf-8'",
+    "'application/openmetrics-text', 'application/openmetrics-text; version=1.0.0; charset=utf-8;"
+        + " escaping=underscores'",
+    "'application/openmetrics-text;version=0.0.1; escaping=underscores',"
+        + " 'application/openmetrics-text; version=1.0.0; charset=utf-8; escaping=underscores'",
+    "'text/plain;version=0.0.4; escaping=allow-utf-8', 'text/plain; version=0.0.4; charset=utf-8;"
+        + " escaping=allow-utf-8'"
   })
   public void testFindWriter(String acceptHeaderValue, String expectedFmt) {
     ExpositionFormats expositionFormats = ExpositionFormats.init();
@@ -2910,9 +3006,9 @@ class ExpositionFormatsTest {
 
     String expected =
         """
-      # TYPE foo_metric untyped
-      foo_metric 1.234
-      """;
+        # TYPE foo_metric untyped
+        foo_metric 1.234
+        """;
 
     assertThat(new String(out, UTF_8)).hasToString(expected);
   }
