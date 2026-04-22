@@ -13,6 +13,8 @@ The main new features of the 1.0.0 release are:
 - **Runtime configuration:** Configure metrics, exporters, and more at runtime using a properties
   file or system properties.
 
+<!-- markdownlint-disable MD036 -->
+
 **Documentation and Examples**
 
 In addition to this documentation page we created an
@@ -38,6 +40,8 @@ Tune in to the live stream on [https://promcon.io](https://promcon.io)
 or watch the recording on YouTube.
 
 **For users of the 0.16.0 version and older**
+
+<!-- markdownlint-enable MD036 -->
 
 Updating to the 1.0.0 version is a breaking change. However, there's a
 `prometheus-metrics-simpleclient-bridge` module available that allows you to use your existing

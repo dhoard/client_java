@@ -21,22 +21,16 @@ mise run test
 # Run all tests including integration tests
 mise run test-all
 
-# Format code with Google Java Format
-mise run format
-
 # Run a single test class
 ./mvnw test -Dtest=CounterTest \
-  -Dspotless.check.skip=true \
   -Dcoverage.skip=true -Dcheckstyle.skip=true
 
 # Run a single test method
 ./mvnw test -Dtest=CounterTest#testIncrement \
-  -Dspotless.check.skip=true \
   -Dcoverage.skip=true -Dcheckstyle.skip=true
 
 # Run tests in a specific module
 ./mvnw test -pl prometheus-metrics-core \
-  -Dspotless.check.skip=true \
   -Dcoverage.skip=true -Dcheckstyle.skip=true
 
 # Regenerate protobuf classes (after protobuf dep update)
@@ -86,7 +80,7 @@ Pre-built instrumentations:
 
 ## Code Style
 
-- **Formatter**: Google Java Format (enforced via Spotless)
+- **Formatter**: Google Java Format (enforced via flint)
 - **Line length**: 100 characters
   (enforced for ALL files including Markdown, Java, YAML)
 - **Indentation**: 2 spaces
@@ -109,7 +103,7 @@ commits. CI will fail if these checks fail.
 
 - **ALWAYS** run `mise run build` after modifying Java files
   to ensure:
-  - Code formatting (Spotless with Google Java Format)
+  - Code formatting via flint
   - Static analysis (`Error Prone` with NullAway)
   - Checkstyle validation
   - Build succeeds (tests are skipped;
@@ -119,7 +113,7 @@ commits. CI will fail if these checks fail.
 
 - **ALWAYS** run `mise run lint` after modifying non-Java
   files (runs super-linter + link checking + BOM check)
-- `mise run fix` autofixes linting issues
+- `mise run lint:fix` autofixes linting issues
 - Super-linter will **autofix** many issues
   (formatting, trailing whitespace, etc.)
 - It only reports ERROR-level issues
@@ -139,7 +133,7 @@ mise run build
 
 # After modifying non-Java files (run BEFORE committing)
 mise run lint
-# or to autofix: mise run fix
+# or to autofix: mise run lint:fix
 ```
 
 ### Before Pushing
