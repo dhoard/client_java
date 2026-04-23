@@ -14,9 +14,7 @@ import io.prometheus.metrics.config.OpenMetrics2Properties;
 import io.prometheus.metrics.model.snapshots.ClassicHistogramBuckets;
 import io.prometheus.metrics.model.snapshots.CounterSnapshot;
 import io.prometheus.metrics.model.snapshots.DataPointSnapshot;
-import io.prometheus.metrics.model.snapshots.DistributionDataPointSnapshot;
 import io.prometheus.metrics.model.snapshots.Exemplar;
-import io.prometheus.metrics.model.snapshots.Exemplars;
 import io.prometheus.metrics.model.snapshots.GaugeSnapshot;
 import io.prometheus.metrics.model.snapshots.HistogramSnapshot;
 import io.prometheus.metrics.model.snapshots.InfoSnapshot;
@@ -36,7 +34,6 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import javax.annotation.Nullable;
 
 /**
@@ -92,6 +89,7 @@ public class OpenMetrics2TextFormatWriter implements ExpositionFormatWriter {
   private final OpenMetrics2Properties openMetrics2Properties;
   private final boolean createdTimestampsEnabled;
   private final boolean exemplarsOnAllMetricTypesEnabled;
+  private final OpenMetricsTextFormatWriter om1Writer;
 
   /**
    * @param openMetrics2Properties OpenMetrics 2.0 feature flags
@@ -106,6 +104,8 @@ public class OpenMetrics2TextFormatWriter implements ExpositionFormatWriter {
     this.openMetrics2Properties = openMetrics2Properties;
     this.createdTimestampsEnabled = createdTimestampsEnabled;
     this.exemplarsOnAllMetricTypesEnabled = exemplarsOnAllMetricTypesEnabled;
+    this.om1Writer =
+        new OpenMetricsTextFormatWriter(createdTimestampsEnabled, exemplarsOnAllMetricTypesEnabled);
   }
 
   public static Builder builder() {
@@ -200,50 +200,66 @@ public class OpenMetrics2TextFormatWriter implements ExpositionFormatWriter {
 
   private void writeHistogram(Writer writer, HistogramSnapshot snapshot, EscapingScheme scheme)
       throws IOException {
+    if (!openMetrics2Properties.getCompositeValues()
+        && !openMetrics2Properties.getExemplarCompliance()) {
+      om1Writer.writeHistogram(writer, snapshot, scheme);
+      return;
+    }
     MetricMetadata metadata = snapshot.getMetadata();
     String name = getExpositionBaseMetadataName(metadata, scheme);
     if (snapshot.isGaugeHistogram()) {
       writeMetadataWithName(writer, name, "gaugehistogram", metadata);
-      writeClassicHistogramBuckets(
-          writer, name, "_gcount", "_gsum", snapshot.getDataPoints(), scheme);
+      for (HistogramSnapshot.HistogramDataPointSnapshot data : snapshot.getDataPoints()) {
+        writeCompositeHistogramDataPoint(writer, name, "gcount", "gsum", data, scheme);
+      }
     } else {
       writeMetadataWithName(writer, name, "histogram", metadata);
-      writeClassicHistogramBuckets(
-          writer, name, "_count", "_sum", snapshot.getDataPoints(), scheme);
+      for (HistogramSnapshot.HistogramDataPointSnapshot data : snapshot.getDataPoints()) {
+        writeCompositeHistogramDataPoint(writer, name, "count", "sum", data, scheme);
+      }
     }
   }
 
-  private void writeClassicHistogramBuckets(
+  private void writeCompositeHistogramDataPoint(
       Writer writer,
       String name,
-      String countSuffix,
-      String sumSuffix,
-      List<HistogramSnapshot.HistogramDataPointSnapshot> dataList,
+      String countKey,
+      String sumKey,
+      HistogramSnapshot.HistogramDataPointSnapshot data,
       EscapingScheme scheme)
       throws IOException {
-    for (HistogramSnapshot.HistogramDataPointSnapshot data : dataList) {
-      ClassicHistogramBuckets buckets = getClassicBuckets(data);
-      Exemplars exemplars = data.getExemplars();
-      long cumulativeCount = 0;
-      for (int i = 0; i < buckets.size(); i++) {
-        cumulativeCount += buckets.getCount(i);
-        writeNameAndLabels(
-            writer, name, "_bucket", data.getLabels(), scheme, "le", buckets.getUpperBound(i));
-        writeLong(writer, cumulativeCount);
-        Exemplar exemplar;
-        if (i == 0) {
-          exemplar = exemplars.get(Double.NEGATIVE_INFINITY, buckets.getUpperBound(i));
-        } else {
-          exemplar = exemplars.get(buckets.getUpperBound(i - 1), buckets.getUpperBound(i));
-        }
-        writeScrapeTimestampAndExemplar(writer, data, exemplar, scheme);
+    writeNameAndLabels(writer, name, null, data.getLabels(), scheme);
+    writer.write('{');
+    writer.write(countKey);
+    writer.write(':');
+    writeLong(writer, data.getCount());
+    writer.write(',');
+    writer.write(sumKey);
+    writer.write(':');
+    writeDouble(writer, data.getSum());
+    writer.write(",bucket:[");
+    ClassicHistogramBuckets buckets = getClassicBuckets(data);
+    long cumulativeCount = 0;
+    for (int i = 0; i < buckets.size(); i++) {
+      if (i > 0) {
+        writer.write(',');
       }
-      // In OpenMetrics format, histogram _count and _sum are either both present or both absent.
-      if (data.hasCount() && data.hasSum()) {
-        writeCountAndSum(writer, name, data, countSuffix, sumSuffix, exemplars, scheme);
-      }
-      writeCreated(writer, name, data, scheme);
+      cumulativeCount += buckets.getCount(i);
+      writeDouble(writer, buckets.getUpperBound(i));
+      writer.write(':');
+      writeLong(writer, cumulativeCount);
     }
+    writer.write("]}");
+    if (data.hasScrapeTimestamp()) {
+      writer.write(' ');
+      writeOpenMetricsTimestamp(writer, data.getScrapeTimestampMillis());
+    }
+    if (data.hasCreatedTimestamp()) {
+      writer.write(" st@");
+      writeOpenMetricsTimestamp(writer, data.getCreatedTimestampMillis());
+    }
+    writeExemplar(writer, data.getExemplars().getLatest(), scheme);
+    writer.write('\n');
   }
 
   private ClassicHistogramBuckets getClassicBuckets(
@@ -258,6 +274,11 @@ public class OpenMetrics2TextFormatWriter implements ExpositionFormatWriter {
 
   private void writeSummary(Writer writer, SummarySnapshot snapshot, EscapingScheme scheme)
       throws IOException {
+    if (!openMetrics2Properties.getCompositeValues()
+        && !openMetrics2Properties.getExemplarCompliance()) {
+      om1Writer.writeSummary(writer, snapshot, scheme);
+      return;
+    }
     boolean metadataWritten = false;
     MetricMetadata metadata = snapshot.getMetadata();
     String name = getExpositionBaseMetadataName(metadata, scheme);
@@ -269,28 +290,59 @@ public class OpenMetrics2TextFormatWriter implements ExpositionFormatWriter {
         writeMetadataWithName(writer, name, "summary", metadata);
         metadataWritten = true;
       }
-      Exemplars exemplars = data.getExemplars();
-      // Exemplars for summaries are new, and there's no best practice yet which Exemplars to choose
-      // for which
-      // time series. We select exemplars[0] for _count, exemplars[1] for _sum, and exemplars[2...]
-      // for the
-      // quantiles, all indexes modulo exemplars.length.
-      int exemplarIndex = 1;
-      for (Quantile quantile : data.getQuantiles()) {
-        writeNameAndLabels(
-            writer, name, null, data.getLabels(), scheme, "quantile", quantile.getQuantile());
-        writeDouble(writer, quantile.getValue());
-        if (exemplars.size() > 0 && exemplarsOnAllMetricTypesEnabled) {
-          exemplarIndex = (exemplarIndex + 1) % exemplars.size();
-          writeScrapeTimestampAndExemplar(writer, data, exemplars.get(exemplarIndex), scheme);
-        } else {
-          writeScrapeTimestampAndExemplar(writer, data, null, scheme);
-        }
-      }
-      // Unlike histograms, summaries can have only a count or only a sum according to OpenMetrics.
-      writeCountAndSum(writer, name, data, "_count", "_sum", exemplars, scheme);
-      writeCreated(writer, name, data, scheme);
+      writeCompositeSummaryDataPoint(writer, name, data, scheme);
     }
+  }
+
+  private void writeCompositeSummaryDataPoint(
+      Writer writer,
+      String name,
+      SummarySnapshot.SummaryDataPointSnapshot data,
+      EscapingScheme scheme)
+      throws IOException {
+    writeNameAndLabels(writer, name, null, data.getLabels(), scheme);
+    writer.write('{');
+    boolean first = true;
+    if (data.hasCount()) {
+      writer.write("count:");
+      writeLong(writer, data.getCount());
+      first = false;
+    }
+    if (data.hasSum()) {
+      if (!first) {
+        writer.write(',');
+      }
+      writer.write("sum:");
+      writeDouble(writer, data.getSum());
+      first = false;
+    }
+    if (data.getQuantiles().size() > 0) {
+      if (!first) {
+        writer.write(',');
+      }
+      writer.write("quantile:[");
+      for (int i = 0; i < data.getQuantiles().size(); i++) {
+        if (i > 0) {
+          writer.write(',');
+        }
+        Quantile q = data.getQuantiles().get(i);
+        writeDouble(writer, q.getQuantile());
+        writer.write(':');
+        writeDouble(writer, q.getValue());
+      }
+      writer.write(']');
+    }
+    writer.write('}');
+    if (data.hasScrapeTimestamp()) {
+      writer.write(' ');
+      writeOpenMetricsTimestamp(writer, data.getScrapeTimestampMillis());
+    }
+    if (data.hasCreatedTimestamp()) {
+      writer.write(" st@");
+      writeOpenMetricsTimestamp(writer, data.getCreatedTimestampMillis());
+    }
+    writeExemplar(writer, data.getExemplars().getLatest(), scheme);
+    writer.write('\n');
   }
 
   private void writeInfo(Writer writer, InfoSnapshot snapshot, EscapingScheme scheme)
@@ -359,31 +411,6 @@ public class OpenMetrics2TextFormatWriter implements ExpositionFormatWriter {
     }
   }
 
-  private void writeCountAndSum(
-      Writer writer,
-      String name,
-      DistributionDataPointSnapshot data,
-      String countSuffix,
-      String sumSuffix,
-      Exemplars exemplars,
-      EscapingScheme scheme)
-      throws IOException {
-    if (data.hasCount()) {
-      writeNameAndLabels(writer, name, countSuffix, data.getLabels(), scheme);
-      writeLong(writer, data.getCount());
-      if (exemplarsOnAllMetricTypesEnabled) {
-        writeScrapeTimestampAndExemplar(writer, data, exemplars.getLatest(), scheme);
-      } else {
-        writeScrapeTimestampAndExemplar(writer, data, null, scheme);
-      }
-    }
-    if (data.hasSum()) {
-      writeNameAndLabels(writer, name, sumSuffix, data.getLabels(), scheme);
-      writeDouble(writer, data.getSum());
-      writeScrapeTimestampAndExemplar(writer, data, null, scheme);
-    }
-  }
-
   private void writeCreated(
       Writer writer, String name, DataPointSnapshot data, EscapingScheme scheme)
       throws IOException {
@@ -442,21 +469,31 @@ public class OpenMetrics2TextFormatWriter implements ExpositionFormatWriter {
   private void writeScrapeTimestampAndExemplar(
       Writer writer, DataPointSnapshot data, @Nullable Exemplar exemplar, EscapingScheme scheme)
       throws IOException {
+    if (!openMetrics2Properties.getExemplarCompliance()) {
+      om1Writer.writeScrapeTimestampAndExemplar(writer, data, exemplar, scheme);
+      return;
+    }
     if (data.hasScrapeTimestamp()) {
       writer.write(' ');
       writeOpenMetricsTimestamp(writer, data.getScrapeTimestampMillis());
     }
-    if (exemplar != null) {
-      writer.write(" # ");
-      writeLabels(writer, exemplar.getLabels(), null, 0, false, scheme);
-      writer.write(' ');
-      writeDouble(writer, exemplar.getValue());
-      if (exemplar.hasTimestamp()) {
-        writer.write(' ');
-        writeOpenMetricsTimestamp(writer, exemplar.getTimestampMillis());
-      }
-    }
+    writeExemplar(writer, exemplar, scheme);
     writer.write('\n');
+  }
+
+  private void writeExemplar(Writer writer, @Nullable Exemplar exemplar, EscapingScheme scheme)
+      throws IOException {
+    if (exemplar == null) {
+      return;
+    }
+    if (!openMetrics2Properties.getExemplarCompliance()) {
+      om1Writer.writeExemplar(writer, exemplar, scheme);
+      return;
+    }
+    // exemplarCompliance=true: exemplars MUST have a timestamp per the OM2 spec.
+    if (exemplar.hasTimestamp()) {
+      om1Writer.writeExemplar(writer, exemplar, scheme);
+    }
   }
 
   private void writeMetadataWithName(
