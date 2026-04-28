@@ -67,24 +67,25 @@
   "mise.toml": {
     "mise": [
       "actionlint",
-      "cargo:xmloxide",
+      "aqua:owenlamont/ryl",
+      "biome",
       "editorconfig-checker",
       "github:google/google-java-format",
       "github:grafana/flint",
+      "github:jonwiggins/xmloxide",
+      "github:koalaman/shellcheck",
       "go:github.com/gohugoio/hugo",
       "go:github.com/grafana/oats",
       "java",
       "lychee",
       "node",
-      "npm:@biomejs/biome",
-      "npm:markdownlint-cli2",
-      "npm:prettier",
       "npm:renovate",
       "pipx:codespell",
-      "pipx:ruff",
       "protoc",
-      "shellcheck",
-      "shfmt"
+      "ruff",
+      "rumdl",
+      "shfmt",
+      "taplo"
     ]
   },
   "mvnw": {

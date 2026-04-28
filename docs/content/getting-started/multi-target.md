@@ -11,8 +11,6 @@ To support multi-target pattern you can create a custom collector overriding the
 method in ExtendedMultiCollector
 see SampleExtendedMultiCollector in io.prometheus.metrics.examples.httpserver
 
-<!-- editorconfig-checker-disable -->
-
 ```java
 public class SampleExtendedMultiCollector extends ExtendedMultiCollector {
 
@@ -79,8 +77,6 @@ public class SampleExtendedMultiCollector extends ExtendedMultiCollector {
 }
 
 ```
-
-<!-- editorconfig-checker-enable -->
 
 `PrometheusScrapeRequest` provides methods to access http-related infos from the request originally
 received by the endpoint
